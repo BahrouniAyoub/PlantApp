@@ -74,7 +74,6 @@ export default function PlantsScreen() {
   const loadCurrentUser = async () => {
     try {
       const userId = await AsyncStorage.getItem('userId');
-      console.log("userId:", userId);
       
       if (userId) {
         setCurrentUserId(userId);
@@ -96,7 +95,6 @@ export default function PlantsScreen() {
 
       // Get the authentication token
       const authToken = await AsyncStorage.getItem('accessToken');
-      console.log("authToken",authToken);
       
 
       if (!authToken) {
@@ -105,7 +103,7 @@ export default function PlantsScreen() {
         return;
       }
 
-      const url = `http://192.168.1.3:5000/plants/${currentUserId}`;
+      const url = `http://172.20.10.2:5000/plants/${currentUserId}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -131,85 +129,98 @@ export default function PlantsScreen() {
  
 
   // Add a new plant by sending it to the backend
-  const addNewPlant = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please grant camera permissions to use this feature.');
-        return;
-      }
+const addNewPlant = async () => {
+  try {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please grant camera permissions to use this feature.');
+      return;
+    }
 
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
+
+    if (result.canceled) return;
+
+    setIsProcessing(true);
+
+    // 1. Recognize the plant using the Create Identification Endpoint
+    const recognizedPlant = await recognizePlant(result.assets[0].uri);
+
+    if (recognizedPlant.result.is_plant.binary && recognizedPlant.result.classification.suggestions.length > 0) {
+      const suggestions = recognizedPlant.result.classification.suggestions.map((suggestion) => ({
+        name: suggestion.name,
+        probability: (suggestion.probability * 100).toFixed(1) + '%',
+      }));
+
+      const topSuggestion = suggestions[0];
+
+      // 2. Fetch the plant details using the Plant Details Endpoint
+      const plantDetails = await getPlantDetail(recognizedPlant.access_token);
+
+      const plantInfo = plantDetails?.details || {};
+
+      // 3. Alert with the data
+      Alert.alert(
+        'Plant Recognized!',
+        `Top Suggestion: ${topSuggestion.name}\nProbability: ${topSuggestion.probability}\n\nPlant Details:\n${plantInfo.description || 'No description available.'}\nWatering: ${plantInfo.watering || 'N/A'}\nSunlight: ${plantInfo.sunlight || 'N/A'}\nTemperature Range: ${plantInfo.temperature_range || 'N/A'}`
+      );
+
+      // Optionally, you can store the plant data in your state and send it to the backend
+      const newPlant: Plant = {
+        id: '', 
+        name: topSuggestion.name,
+        image: result.assets[0].uri,
+        health: 'Excellent',
+        lastWatered: 'Just now',
+        common_names: suggestions.map((s) => s.name),
+        light_requirements: plantInfo.sunlight || 'N/A',
+        watering_frequency: plantInfo.watering || 'N/A',
+        temperature_range: plantInfo.temperature_range || 'N/A',
+        is_plant: recognizedPlant.result.is_plant,
+        classification: recognizedPlant.result.classification,
+      };
+
+      // Send the new plant to the backend
+      const response = await fetch('http://172.20.10.2:5000/plants', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
+        },
+        body: JSON.stringify({ ...newPlant, userId: currentUserId }),
       });
 
-      if (result.canceled) return;
-
-      setIsProcessing(true);
-
-      const recognizedPlant = await recognizePlant(result.assets[0].uri);
-
-      if (recognizedPlant.result.is_plant.binary && recognizedPlant.result.classification.suggestions.length > 0) {
-        const suggestions = recognizedPlant.result.classification.suggestions.map((suggestion) => ({
-          name: suggestion.name,
-          probability: (suggestion.probability * 100).toFixed(1) + '%',
-        }));
-
-        const newPlant: Plant = {
-          id: '', 
-          name: suggestions[0].name,
-          image: result.assets[0].uri,
-          health: 'Excellent',
-          lastWatered: 'Just now',
-          common_names: suggestions.map((s) => s.name),
-          light_requirements: 'N/A',
-          watering_frequency: 'N/A',
-          temperature_range: 'N/A',
-          is_plant: recognizedPlant.result.is_plant,
-          classification: recognizedPlant.result.classification,
-        };
-
-
-        // Send the new plant to the backend
-        const response = await fetch('http://192.168.1.3:5000/plants', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
-          },
-          body: JSON.stringify({ ...newPlant, userId: currentUserId }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to add plant');
-        }
-
-        const createdPlant = await response.json();
-        
-        setPlants((prevPlants) => [...prevPlants, createdPlant]);
-
-        Alert.alert(
-          'Plant Recognized!',
-          `Top Suggestion: ${suggestions[0].name}\nProbability: ${suggestions[0].probability}`
-        );
-      } else {
-        Alert.alert('No Plant Detected', 'Please try again with a clearer image.');
+      if (!response.ok) {
+        throw new Error('Failed to add plant');
       }
+
+      const createdPlant = await response.json();
+      setPlants((prevPlants) => [...prevPlants, createdPlant]);
+    } else {
+      Alert.alert('No Plant Detected', 'Please try again with a clearer image.');
+    }
+  } catch (error) {
+    console.error('Error in addNewPlant:', error);
+    Alert.alert('Error', 'Failed to capture or process the image.');
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+
+  const handlePlantPress = async (plant: Plant) => {
+    try {
+      await AsyncStorage.setItem('currentPlant', JSON.stringify(plant));
+      router.push('/dashboard');
     } catch (error) {
-      console.error('Error in addNewPlant:', error);
-      Alert.alert('Error', 'Failed to capture or process the image.');
-    } finally {
-      setIsProcessing(false);
+      console.error('Error saving plant data:', error);
     }
   };
-
-  const handlePlantPress = (plant: Plant) => {
-    router.push(`/dashboard?plant=${encodeURIComponent(JSON.stringify(plant))}`);
-  };
-
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>

@@ -1,11 +1,16 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { recognizePlant, getPlantDetail } from '../plantService'; // Updated import
+import { AxiosError } from 'axios';
 
 export default function CameraScreen() {
-  const [image, setImage] = useState(null);
+  const [image, setImage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [plantDetails, setPlantDetails] = useState<any>(null); // State to store plant details
 
+  // Function to pick an image from the camera
   const pickImage = async () => {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -15,8 +20,80 @@ export default function CameraScreen() {
     });
 
     if (!result.canceled) {
-      setImage(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      setImage(imageUri);
+      identifyPlant(imageUri); // Call the function to identify the plant after selecting the image
     }
+  };
+
+  // Function to identify the plant from the selected image
+  const identifyPlant = async (imageUri: string) => {
+    setLoading(true);
+
+    try {
+      // Step 1: Recognize plant using the Plant.id API
+      const recognitionResult = await recognizePlant(imageUri);
+
+      console.log('Recognition result:', recognitionResult);
+
+      // Check if suggestions are available from the recognition result
+      if (recognitionResult?.result?.classification?.suggestions) {
+        const plantSuggestion = recognitionResult.result.classification.suggestions[0]; // Get the first suggestion
+
+        if (plantSuggestion) {
+          // Step 2: Fetch detailed plant information using the plant ID
+          const plantDetailsResponse = await getPlantDetail(plantSuggestion.id);
+
+          console.log('Plant details:', plantDetailsResponse);
+
+          setPlantDetails(plantDetailsResponse?.data); // Store plant details in the state
+
+          // Display a simple alert with the plant name
+          Alert.alert('Plant Identified', plantSuggestion.name, [
+            {
+              text: 'OK',
+              onPress: () => {
+                setLoading(false);
+                setImage(null); // Optionally reset the image after identification
+              },
+            },
+          ]);
+        }
+      } else {
+        setLoading(false);
+        Alert.alert('Error', 'Could not identify the plant. Please try again.');
+      }
+    } catch (error: unknown) {
+      setLoading(false);
+      console.error('Error identifying plant:', error);
+
+      if (error instanceof AxiosError) {
+        Alert.alert("API Error", `Error: ${error.response?.status} - ${error.response?.data}`);
+      } else {
+        Alert.alert("Error", "An unexpected error occurred.");
+      }
+    }
+  };
+
+  // Function to render plant details in the alert or directly in the UI
+  const renderPlantDetails = () => {
+    if (!plantDetails) return null;
+
+    const plantInfo = plantDetails;
+    const detailsMessage = `
+      🌿 Name: ${plantInfo?.name || 'N/A'}
+      🌎 Common Names: ${plantInfo?.common_names?.join(', ') || 'N/A'}
+      🔍 Probability: ${plantInfo?.probability ? (plantInfo.probability * 100).toFixed(2) : 'N/A'}%
+      🌱 Description: ${plantInfo?.description || 'No additional details available.'}
+      🌞 Sunlight: ${plantInfo?.sunlight || 'N/A'}
+      💧 Watering: ${plantInfo?.watering || 'N/A'}
+      🌡️ Temperature Range: ${plantInfo?.temperature_range || 'N/A'}
+      🍴 Edible Parts: ${plantInfo?.edible_parts || 'N/A'}
+      🌱 Propagation Methods: ${plantInfo?.propagation_methods || 'N/A'}
+      📊 Taxonomy: ${plantInfo?.taxonomy || 'N/A'}
+      🔗 URL: ${plantInfo?.url || 'N/A'}
+    `;
+    return <Text>{detailsMessage}</Text>;
   };
 
   return (
@@ -30,14 +107,13 @@ export default function CameraScreen() {
         {image ? (
           <View style={styles.previewContainer}>
             <Image source={{ uri: image }} style={styles.preview} />
-            <View style={styles.resultCard}>
-              <Text style={styles.resultTitle}>Analysis Result</Text>
-              <Text style={styles.plantName}>Monstera Deliciosa</Text>
-              <Text style={styles.confidence}>Confidence: 95%</Text>
+            {loading ? (
+              <ActivityIndicator size="large" color="#2F9E44" style={{ marginTop: 10 }} />
+            ) : (
               <TouchableOpacity style={styles.retakeButton} onPress={() => setImage(null)}>
                 <Text style={styles.retakeText}>Take Another Photo</Text>
               </TouchableOpacity>
-            </View>
+            )}
           </View>
         ) : (
           <TouchableOpacity style={styles.cameraButton} onPress={pickImage}>
@@ -47,20 +123,9 @@ export default function CameraScreen() {
         )}
       </View>
 
-      <View style={styles.tipsContainer}>
-        <Text style={styles.tipsTitle}>Tips for better identification:</Text>
-        <View style={styles.tipItem}>
-          <Ionicons name="checkmark-circle-outline" size={20} color="#2F9E44" />
-          <Text style={styles.tipText}>Ensure good lighting</Text>
-        </View>
-        <View style={styles.tipItem}>
-          <Ionicons name="checkmark-circle-outline" size={20} color="#2F9E44" />
-          <Text style={styles.tipText}>Focus on leaves and flowers</Text>
-        </View>
-        <View style={styles.tipItem}>
-          <Ionicons name="checkmark-circle-outline" size={20} color="#2F9E44" />
-          <Text style={styles.tipText}>Keep the camera steady</Text>
-        </View>
+      {/* Render Plant Details if available */}
+      <View style={styles.detailsContainer}>
+        {renderPlantDetails()}
       </View>
     </View>
   );
@@ -111,69 +176,30 @@ const styles = StyleSheet.create({
   },
   previewContainer: {
     width: '100%',
+    alignItems: 'center',
   },
   preview: {
     width: '100%',
     height: 300,
     borderRadius: 12,
   },
-  resultCard: {
-    backgroundColor: '#ffffff',
-    padding: 20,
-    borderRadius: 12,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  resultTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 10,
-  },
-  plantName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2F9E44',
-    marginBottom: 5,
-  },
-  confidence: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 15,
-  },
   retakeButton: {
     backgroundColor: '#2F9E44',
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
+    marginTop: 15,
   },
   retakeText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '500',
   },
-  tipsContainer: {
+  detailsContainer: {
     padding: 20,
     backgroundColor: '#ffffff',
-  },
-  tipsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 10,
-  },
-  tipItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  tipText: {
-    marginLeft: 10,
-    fontSize: 14,
-    color: '#666666',
+    marginTop: 20,
+    borderRadius: 8,
+    marginHorizontal: 15,
   },
 });

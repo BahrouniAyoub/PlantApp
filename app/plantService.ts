@@ -5,6 +5,7 @@ import * as FileSystem from 'expo-file-system';
 
 const PLANT_ID_API_KEY = 'H2PEHTBnlBy9TPy53lRfozUyBjLBsUQQlZEIGXWRBqx4A0Dr23';
 const PLANT_ID_API_URL = 'https://plant.id/api/v3/identification';
+const PLANT_ID_API_DETAIL_URL = 'https://plant.id/api/v3/kb/plants';
 
 interface SimilarImage {
     id: string;
@@ -74,6 +75,7 @@ const optimizeImage = async (imageUri: string): Promise<string> => {
     }
 };
 
+// Recognize the plant using the Plant.id API
 export const recognizePlant = async (imageUri: string): Promise<PlantRecognitionResult> => {
     try {
         const optimizedUri = await optimizeImage(imageUri);
@@ -95,11 +97,14 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
             timeout: 20000,
         });
 
-        console.log('✅ Response from Plant.id API:', response.data.access_token);
+        const accessToken = response.data.access_token;
+        console.log('✅ Response from Plant.id API:', accessToken); // Log the access_token for debugging
+
+        if (!accessToken) {
+            throw new Error('Access token not received.');
+        }
 
         const data = response.data;
-
-        // ✅ Handle suggestions
         const suggestions = data?.result?.classification?.suggestions || [];
         if (!Array.isArray(suggestions) || suggestions.length === 0) {
             throw new Error('⚠️ Plant not recognized.');
@@ -117,7 +122,7 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
         console.log('💧 Watering:', watering);
 
         return {
-            access_token: data.access_token || 'N/A',
+            access_token: accessToken,
             model_version: data.model_version || 'N/A',
             custom_id: data.custom_id || null,
             input: {
@@ -139,9 +144,55 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
             created: data.created || 0,
             completed: data.completed || 0,
         };
-        
+
     } catch (error: any) {
         console.error('❌ Error recognizing plant:', error?.response?.data || error.message);
         throw error;
+    }
+};
+
+// Fetch plant details using the access_token from the recognition request
+export const getPlantDetail = async (accessToken: string) => {
+  try {    
+    // Make the request with the API key and access token
+    const response = await axios.get(`https://plant.id/api/v3/kb/plants/${accessToken}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Api-Key': PLANT_ID_API_KEY,
+      },
+      params: {
+        details: 'common_names,url,description,taxonomy,rank,gbif_id,inaturalist_id,image,synonyms,edible_parts,watering,propagation_methods',
+        language: 'en',
+      },
+    });
+
+    return response.data; // Return the data if the request is successful
+  } catch (error) {
+    console.error('Error fetching plant details:', error);
+    throw error; // Rethrow the error so we can handle it in the calling function
+  }
+};
+
+
+// Integration function for recognizing plant and fetching its details
+const recognizeAndFetchDetails = async (imageUri: string) => {
+    try {
+        // Step 1: Recognize the plant and get the access token
+        const recognitionResult = await recognizePlant(imageUri);
+        const accessToken = recognitionResult.access_token;
+
+        if (!accessToken) {
+            throw new Error('No access token available');
+        }
+
+        console.log('Access Token:', accessToken);  // Log the token for debugging
+
+        // Step 2: Fetch plant details using the access token
+        const plantDetails = await getPlantDetail(accessToken);  // Pass access token here
+        console.log('Plant Details:', plantDetails);  // Log plant details
+
+    } catch (error) {
+        console.error('Error during plant recognition or fetching details:', error);
+        alert('Something went wrong. Please try again.');
     }
 };
