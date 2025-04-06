@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { recognizePlant, getPlantDetail } from '../plantService'; // Updated import
-import { AxiosError } from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { recognizePlant } from '../plantService'; // Import the plant recognition service
+import { useRouter } from 'expo-router';
 
-export default function CameraScreen() {
+export default function CameraPage() {
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [plantDetails, setPlantDetails] = useState<any>(null); // State to store plant details
+  const router = useRouter();
 
   // Function to pick an image from the camera
   const pickImage = async () => {
@@ -26,74 +27,44 @@ export default function CameraScreen() {
     }
   };
 
-  // Function to identify the plant from the selected image
+  // Function to identify the plant and add it to the database
   const identifyPlant = async (imageUri: string) => {
-    setLoading(true);
-
     try {
-      // Step 1: Recognize plant using the Plant.id API
       const recognitionResult = await recognizePlant(imageUri);
-
-      console.log('Recognition result:', recognitionResult);
-
-      // Check if suggestions are available from the recognition result
+  
       if (recognitionResult?.result?.classification?.suggestions) {
-        const plantSuggestion = recognitionResult.result.classification.suggestions[0]; // Get the first suggestion
-
+        const plantSuggestion = recognitionResult.result.classification.suggestions[0];
+  
         if (plantSuggestion) {
-          // Step 2: Fetch detailed plant information using the plant ID
-          const plantDetailsResponse = await getPlantDetail(plantSuggestion.id);
-
-          console.log('Plant details:', plantDetailsResponse);
-
-          setPlantDetails(plantDetailsResponse?.data); // Store plant details in the state
-
-          // Display a simple alert with the plant name
-          Alert.alert('Plant Identified', plantSuggestion.name, [
-            {
-              text: 'OK',
-              onPress: () => {
-                setLoading(false);
-                setImage(null); // Optionally reset the image after identification
-              },
+          const newPlant = {
+            _id: '',
+            name: plantSuggestion.name,
+            image: imageUri,
+            is_plant: recognitionResult.result.is_plant,
+            classification: recognitionResult.result.classification,
+          };
+  
+          const response = await fetch('http://192.168.0.141:5000/plants', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
             },
-          ]);
+            body: JSON.stringify({ ...newPlant, userId: await AsyncStorage.getItem('userId') }),
+          });
+  
+          if (!response.ok) {
+            throw new Error('Failed to add plant');
+          }
+  
+          Alert.alert('Success', 'Plant added successfully!');
+          router.push('/(tabs)'); // Navigate back to the plants list
         }
-      } else {
-        setLoading(false);
-        Alert.alert('Error', 'Could not identify the plant. Please try again.');
       }
-    } catch (error: unknown) {
-      setLoading(false);
+    } catch (error) {
       console.error('Error identifying plant:', error);
-
-      if (error instanceof AxiosError) {
-        Alert.alert("API Error", `Error: ${error.response?.status} - ${error.response?.data}`);
-      } else {
-        Alert.alert("Error", "An unexpected error occurred.");
-      }
+      Alert.alert('Error', 'Failed to identify or add the plant.');
     }
-  };
-
-  // Function to render plant details in the alert or directly in the UI
-  const renderPlantDetails = () => {
-    if (!plantDetails) return null;
-
-    const plantInfo = plantDetails;
-    const detailsMessage = `
-      🌿 Name: ${plantInfo?.name || 'N/A'}
-      🌎 Common Names: ${plantInfo?.common_names?.join(', ') || 'N/A'}
-      🔍 Probability: ${plantInfo?.probability ? (plantInfo.probability * 100).toFixed(2) : 'N/A'}%
-      🌱 Description: ${plantInfo?.description || 'No additional details available.'}
-      🌞 Sunlight: ${plantInfo?.sunlight || 'N/A'}
-      💧 Watering: ${plantInfo?.watering || 'N/A'}
-      🌡️ Temperature Range: ${plantInfo?.temperature_range || 'N/A'}
-      🍴 Edible Parts: ${plantInfo?.edible_parts || 'N/A'}
-      🌱 Propagation Methods: ${plantInfo?.propagation_methods || 'N/A'}
-      📊 Taxonomy: ${plantInfo?.taxonomy || 'N/A'}
-      🔗 URL: ${plantInfo?.url || 'N/A'}
-    `;
-    return <Text>{detailsMessage}</Text>;
   };
 
   return (
@@ -121,11 +92,6 @@ export default function CameraScreen() {
             <Text style={styles.cameraText}>Take Photo</Text>
           </TouchableOpacity>
         )}
-      </View>
-
-      {/* Render Plant Details if available */}
-      <View style={styles.detailsContainer}>
-        {renderPlantDetails()}
       </View>
     </View>
   );
@@ -194,12 +160,5 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '500',
-  },
-  detailsContainer: {
-    padding: 20,
-    backgroundColor: '#ffffff',
-    marginTop: 20,
-    borderRadius: 8,
-    marginHorizontal: 15,
   },
 });

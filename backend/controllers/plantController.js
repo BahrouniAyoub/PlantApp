@@ -7,10 +7,7 @@ exports.addPlant = async (req, res) => {
     // Destructure all required fields from req.body
     const {
       name,
-      type,
       image,
-      wateringFrequency,
-      lastWatered,
       userId,
       is_plant,
       classification,
@@ -24,10 +21,7 @@ exports.addPlant = async (req, res) => {
     // Create a new Plant instance with all the provided data
     const plant = new Plant({
       name,
-      type,
       image,
-      wateringFrequency,
-      lastWatered,
       userId,
       is_plant,
       classification,
@@ -63,6 +57,24 @@ exports.getPlants = async (req, res) => {
   } catch (error) {
     console.error("Get plants error:", error);
     res.status(500).send("Error fetching plants");
+  }
+};
+
+// Get a plant by ID
+exports.getPlantById = async (req, res) => {
+  const { id } = req.params; // Extract the plant ID from the request parameters
+
+  try {
+    const plant = await Plant.findById(id); // Find the plant by its ID
+
+    if (!plant) {
+      return res.status(404).json({ error: 'Plant not found' }); // Return 404 if the plant doesn't exist
+    }
+
+    res.status(200).json(plant); // Return the plant data
+  } catch (error) {
+    console.error('Get plant by ID error:', error);
+    res.status(500).send('Error fetching plant');
   }
 };
 

@@ -15,16 +15,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { recognizePlant } from '../plantService';
 
 interface Plant {
-  id: string; // Use string for MongoDB ObjectId
+  _id: string; // Use string for MongoDB ObjectId
   name: string;
   image: string;
-  health: string;
-  lastWatered: string;
-  common_names?: string[];
-  care_details?: string;
-  light_requirements: string;
-  watering_frequency: string;
-  temperature_range: string;
   is_plant: {
     probability: number;
     binary: boolean;
@@ -45,8 +38,19 @@ interface Plant {
         url_small: string;
       }>;
       details: {
-        language: string;
-        entity_id: string;
+        language: String;
+        entity_id: String;
+        common_names?: string[];
+        description?: {
+          value: string;
+          citation?: string;
+          license_name?: string;
+          license_url?: string;
+        };
+        common_uses?: string;
+        best_light_condition?: string;
+        best_watering?: string;
+        best_soil_type?: string;
       };
     }>;
   };
@@ -67,14 +71,14 @@ export default function PlantsScreen() {
       loadPlants();
     }
   }, [currentUserId]);
-  
+
 
 
   // Load the current user's ID from AsyncStorage
   const loadCurrentUser = async () => {
     try {
       const userId = await AsyncStorage.getItem('userId');
-      
+
       if (userId) {
         setCurrentUserId(userId);
       } else {
@@ -95,7 +99,7 @@ export default function PlantsScreen() {
 
       // Get the authentication token
       const authToken = await AsyncStorage.getItem('accessToken');
-      
+
 
       if (!authToken) {
         console.error('Error: Missing authToken');
@@ -103,7 +107,7 @@ export default function PlantsScreen() {
         return;
       }
 
-      const url = `http://172.20.10.2:5000/plants/${currentUserId}`;
+      const url = `http://192.168.0.141:5000/plants/${currentUserId}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -126,91 +130,114 @@ export default function PlantsScreen() {
   };
 
 
- 
+
 
   // Add a new plant by sending it to the backend
-const addNewPlant = async () => {
-  try {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please grant camera permissions to use this feature.');
-      return;
+  const addNewPlant = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant camera permissions to use this feature.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 1,
+      });
+
+      if (result.canceled) return;
+
+      setIsProcessing(true);
+
+      // 1. Recognize the plant using the Create Identification Endpoint
+      const recognizedPlant = await recognizePlant(result.assets[0].uri);
+      console.log('🚀 Plant recognition description:', recognizedPlant.result.classification.suggestions[0].details.description);
+
+
+      if (recognizedPlant.result.is_plant.binary && recognizedPlant.result.classification.suggestions.length > 0) {
+        const suggestions = recognizedPlant.result.classification.suggestions.map((suggestion) => ({
+          name: suggestion.name,
+          details: {
+            common_names: suggestion.details.common_names,
+            description: suggestion.details.description,
+            common_uses: suggestion.details.common_uses,
+            best_light_condition: suggestion.details.best_light_condition,
+            best_watering: suggestion.details.best_watering,
+            best_soil_type: suggestion.details.best_soil_type,
+          }
+        }));
+
+        const topSuggestion = suggestions[0];
+
+
+        // 3. Alert with the data
+        Alert.alert(
+          'Plant Recognized!',
+          `Top Suggestion: ${topSuggestion.name}\nDescription: ${topSuggestion.details.description?.value || 'No description available.'}\nCommon Names: ${topSuggestion.details.common_names?.join(', ') || 'No common names available.'}
+          \nBest Light Condition: ${topSuggestion.details.best_light_condition || 'No information available.'}\nBest Watering: ${topSuggestion.details.best_watering || 'No information available.'}\nBest Soil Type: ${topSuggestion.details.best_soil_type || 'No information available.'}`,
+        );
+
+        // Optionally, you can store the plant data in your state and send it to the backend
+        const newPlant: Plant = {
+          _id: '',
+          name: topSuggestion.name,
+          image: result.assets[0].uri,
+          is_plant: recognizedPlant.result.is_plant,
+          classification: recognizedPlant.result.classification,
+        };
+
+        // Send the new plant to the backend
+        const response = await fetch('http://192.168.0.141:5000/plants', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
+          },
+          body: JSON.stringify({ ...newPlant, userId: currentUserId }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to add plant');
+        }
+
+        const createdPlant = await response.json();
+        setPlants((prevPlants) => [...prevPlants, createdPlant]);
+      } else {
+        Alert.alert('No Plant Detected', 'Please try again with a clearer image.');
+      }
+    } catch (error) {
+      console.error('Error in addNewPlant:', error);
+      Alert.alert('Error', 'Failed to capture or process the image.');
+    } finally {
+      setIsProcessing(false);
     }
+  };
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-
-    if (result.canceled) return;
-
-    setIsProcessing(true);
-
-    // 1. Recognize the plant using the Create Identification Endpoint
-    const recognizedPlant = await recognizePlant(result.assets[0].uri);
-
-    if (recognizedPlant.result.is_plant.binary && recognizedPlant.result.classification.suggestions.length > 0) {
-      const suggestions = recognizedPlant.result.classification.suggestions.map((suggestion) => ({
-        name: suggestion.name,
-        probability: (suggestion.probability * 100).toFixed(1) + '%',
-      }));
-
-      const topSuggestion = suggestions[0];
-
-      // 2. Fetch the plant details using the Plant Details Endpoint
-      const plantDetails = await getPlantDetail(recognizedPlant.access_token);
-
-      const plantInfo = plantDetails?.details || {};
-
-      // 3. Alert with the data
-      Alert.alert(
-        'Plant Recognized!',
-        `Top Suggestion: ${topSuggestion.name}\nProbability: ${topSuggestion.probability}\n\nPlant Details:\n${plantInfo.description || 'No description available.'}\nWatering: ${plantInfo.watering || 'N/A'}\nSunlight: ${plantInfo.sunlight || 'N/A'}\nTemperature Range: ${plantInfo.temperature_range || 'N/A'}`
-      );
-
-      // Optionally, you can store the plant data in your state and send it to the backend
-      const newPlant: Plant = {
-        id: '', 
-        name: topSuggestion.name,
-        image: result.assets[0].uri,
-        health: 'Excellent',
-        lastWatered: 'Just now',
-        common_names: suggestions.map((s) => s.name),
-        light_requirements: plantInfo.sunlight || 'N/A',
-        watering_frequency: plantInfo.watering || 'N/A',
-        temperature_range: plantInfo.temperature_range || 'N/A',
-        is_plant: recognizedPlant.result.is_plant,
-        classification: recognizedPlant.result.classification,
-      };
-
-      // Send the new plant to the backend
-      const response = await fetch('http://172.20.10.2:5000/plants', {
-        method: 'POST',
+  const fetchPlants = async () => {
+    try {
+      const response = await fetch('http://192.168.0.141:5000/plants', {
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
         },
-        body: JSON.stringify({ ...newPlant, userId: currentUserId }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to add plant');
+        throw new Error('Failed to fetch plants');
       }
 
-      const createdPlant = await response.json();
-      setPlants((prevPlants) => [...prevPlants, createdPlant]);
-    } else {
-      Alert.alert('No Plant Detected', 'Please try again with a clearer image.');
+      const plants = await response.json();
+      setPlants(plants);
+    } catch (error) {
+      console.error('Error fetching plants:', error);
     }
-  } catch (error) {
-    console.error('Error in addNewPlant:', error);
-    Alert.alert('Error', 'Failed to capture or process the image.');
-  } finally {
-    setIsProcessing(false);
-  }
-};
+  };
+
+  useEffect(() => {
+    fetchPlants();
+  }, []);
 
 
   const handlePlantPress = async (plant: Plant) => {
@@ -221,6 +248,37 @@ const addNewPlant = async () => {
       console.error('Error saving plant data:', error);
     }
   };
+
+  const handleDeletePlant = async (plantId: string) => {
+    try {
+      const authToken = await AsyncStorage.getItem('accessToken');
+      if (!authToken) {
+        console.error('Error: Missing authToken');
+        Alert.alert('Error', 'Authentication required. Please log in again.');
+        return;
+      }
+
+      const url = `http://192.168.0.141:5000/plants/${plantId}`;
+
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete plant. Status: ${response.status}`);
+      }
+
+      setPlants((prevPlants) => prevPlants.filter((plant) => plant._id !== plantId));
+    } catch (error) {
+      console.error('Error deleting plant:', error);
+      Alert.alert('Error', 'Failed to delete plant. Please try again.');
+    }
+  };
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
@@ -234,25 +292,20 @@ const addNewPlant = async () => {
         </TouchableOpacity>
       </View>
       {plants.map((plant) => (
-        <TouchableOpacity key={plant._id} style={styles.plantCard} onPress={() => handlePlantPress(plant)}>
-          <Image source={{ uri: plant.image }} style={styles.plantImage} />
-          <View style={styles.plantInfo}>
-            <Text style={styles.plantName}>{plant.name}</Text>
-            <View style={styles.statusContainer}>
-              <View
-                style={[
-                  styles.healthIndicator,
-                  {
-                    backgroundColor: plant.health === 'Excellent' ? '#2F9E44' :
-                      plant.health === 'Good' ? '#FFA500' : '#FF4444',
-                  },
-                ]}
-              />
-              <Text style={styles.healthText}>{plant.health}</Text>
+        <View key={plant._id} style={styles.plantCard}>
+          <TouchableOpacity style={styles.plantInfo} onPress={() => handlePlantPress(plant)}>
+            <Image source={{ uri: plant.image }} style={styles.plantImage} />
+            <View>
+              <Text style={styles.plantName}>{plant.name}</Text>
             </View>
-          </View>
-          <Ionicons name="chevron-forward" size={24} color="#666666" />
-        </TouchableOpacity>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDeletePlant(plant._id)}
+          >
+            <Ionicons name="trash-outline" size={24} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
       ))}
     </ScrollView>
   );
@@ -326,5 +379,10 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     marginRight: 6,
+  },
+  deleteButton: {
+    backgroundColor: '#FF5252',
+    borderRadius: 50,
+    padding: 8,
   },
 });

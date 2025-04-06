@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Alert } from 'react-native';
 
-const API_KEY = 'H2PEHTBnlBy9TPy53lRfozUyBjLBsUQQlZEIGXWRBqx4A0Dr23';
+const API_KEY = 'c1y6SCBSR2QwfpCDFWdFQochJctTl64VgtVg9z5hoxGvz3n882';
 
 export async function identifyPlant(imageUri: string): Promise<string> {
   try {

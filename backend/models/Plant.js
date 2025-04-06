@@ -3,11 +3,8 @@ const mongoose = require('mongoose');
 
 const PlantSchema = new mongoose.Schema({
   name: String,
-  type: String,
   image: String,
-  wateringFrequency: String,
-  lastWatered: String,
-  userId: String, 
+  userId: String,
   is_plant: {
     probability: Number,
     binary: Boolean,
@@ -34,10 +31,16 @@ const PlantSchema = new mongoose.Schema({
           language: String,
           entity_id: String,
           common_names: [String],
-          description: String,
-          sunlight: String,
-          watering: String,
-          temperature_range: String,
+          description: {
+            value: String,
+            citation: String,
+            license_name: String,
+            license_url: String,
+          },
+          common_uses: String,
+          best_light_condition: String,
+          best_watering: String,
+          best_soil_type: String,
         },
       },
     ],

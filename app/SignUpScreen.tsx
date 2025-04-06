@@ -14,7 +14,7 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     setLoading(true);
     try {
-      const response = await axios.post(`http://172.20.10.2:5000/api/auth/signup`, {
+      const response = await axios.post(`http://192.168.0.141:5000/api/auth/signup`, {
         name,
         email,
         password,
