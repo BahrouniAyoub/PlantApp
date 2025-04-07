@@ -17,11 +17,11 @@ npm install
 
 ## 3️⃣ Set Up Environment Variables
 
-PLANT_ID_API_KEY = 'you_api_key';
-PLANT_ID_API_URL = 'https://plant.id/api/v3/';
-API_URL=<your_ip_adress>:5000
-JWT_SECRET=<your_jwt_secrect_key>
-MONGO_URI=your_mongodb_uri
+**PLANT_ID_API_KEY** = 'you_api_key';
+**PLANT_ID_API_URL** = 'https://plant.id/api/v3/';
+**API_URL**=<your_ip_adress>:5000
+**JWT_SECRET**=<your_jwt_secrect_key>
+**MONGO_URI**=your_mongodb_uri
 
 ## 4️⃣ Start the Backend
 cd backend
