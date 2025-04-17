@@ -41,9 +41,32 @@ const PlantSchema = new mongoose.Schema({
           best_light_condition: String,
           best_watering: String,
           best_soil_type: String,
+          toxicity: String,
         },
       },
     ],
+  },
+  // Plant Health Field updated to accept nested objects
+  plantHealth: {
+    is_healthy: {
+      probability: Number,
+      binary: Boolean,
+    },
+    disease: {
+      suggestions: [
+        {
+          name: String,
+          probability: Number,
+          details: {
+            description: String,
+            // Change treatment from String to Mixed:
+            treatment: { type: mongoose.Schema.Types.Mixed },
+            cause: String,
+            url: String,
+          },
+        },
+      ],
+    },
   },
   status: String,
   sla_compliant_client: Boolean,

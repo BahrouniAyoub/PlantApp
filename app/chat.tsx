@@ -65,7 +65,7 @@ export default function ChatScreen() {
         },
         {
           headers: {
-            Authorization: `Bearer c1y6SCBSR2QwfpCDFWdFQochJctTl64VgtVg9z5hoxGvz3n882`, // Replace with your API Key
+            Authorization: `Bearer VTSXEXvv5uzUkTJULkgDFNmzDNJ5q2rlWJVzyXbMDa2FwaT0w7`, // Replace with your API Key
             'Content-Type': 'application/json',
           },
         }

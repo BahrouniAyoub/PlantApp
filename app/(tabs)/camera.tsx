@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { recognizePlant } from '../plantService'; // Import the plant recognition service
+import { assessPlantHealth, recognizePlant } from '../plantService'; // Import the plant recognition service
 import { useRouter } from 'expo-router';
 
 export default function CameraPage() {
@@ -29,12 +38,15 @@ export default function CameraPage() {
 
   // Function to identify the plant and add it to the database
   const identifyPlant = async (imageUri: string) => {
+    setLoading(true);
     try {
       const recognitionResult = await recognizePlant(imageUri);
-  
+      const health = await assessPlantHealth(imageUri);
+      console.log("Health Data", health);
+
       if (recognitionResult?.result?.classification?.suggestions) {
         const plantSuggestion = recognitionResult.result.classification.suggestions[0];
-  
+
         if (plantSuggestion) {
           const newPlant = {
             _id: '',
@@ -42,9 +54,13 @@ export default function CameraPage() {
             image: imageUri,
             is_plant: recognitionResult.result.is_plant,
             classification: recognitionResult.result.classification,
+            plantHealth: {
+              is_healthy: health.result.is_healthy,
+              disease: health.result.disease,
+            },
           };
-  
-          const response = await fetch('http://192.168.0.141:5000/plants', {
+
+          const response = await fetch('http://192.168.1.10:5000/plants', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -52,18 +68,22 @@ export default function CameraPage() {
             },
             body: JSON.stringify({ ...newPlant, userId: await AsyncStorage.getItem('userId') }),
           });
-  
-          if (!response.ok) {
-            throw new Error('Failed to add plant');
-          }
-  
+
+          if (!response.ok) throw new Error('Failed to add plant');
+
+          const createdPlant = await response.json();
+          
+          await AsyncStorage.setItem('currentPlant', JSON.stringify(createdPlant));
+
           Alert.alert('Success', 'Plant added successfully!');
-          router.push('/(tabs)'); // Navigate back to the plants list
+          router.push('/dashboard');
         }
       }
     } catch (error) {
       console.error('Error identifying plant:', error);
       Alert.alert('Error', 'Failed to identify or add the plant.');
+    } finally {
+      setLoading(false);
     }
   };
 

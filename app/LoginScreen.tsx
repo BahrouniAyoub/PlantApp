@@ -16,7 +16,7 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     setLoading(true);
     try {
-      const response = await axios.post('http://192.168.0.141:5000/api/auth/login', { email, password });
+      const response = await axios.post('http://192.168.1.10:5000/api/auth/login', { email, password });
       alert('Login Successful!');
       
       // Store both tokens

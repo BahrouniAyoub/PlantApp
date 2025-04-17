@@ -10,12 +10,12 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { recognizePlant } from '../plantService';
+import { assessPlantHealth, recognizePlant } from '../plantService';
 
 interface Plant {
-  _id: string; // Use string for MongoDB ObjectId
+  _id: string;
   name: string;
   image: string;
   is_plant: {
@@ -28,37 +28,43 @@ interface Plant {
       id: string;
       name: string;
       probability: number;
-      similar_images: Array<{
-        id: string;
-        url: string;
-        license_name?: string;
-        license_url?: string;
-        citation?: string;
-        similarity: number;
-        url_small: string;
-      }>;
       details: {
-        language: String;
-        entity_id: String;
         common_names?: string[];
-        description?: {
-          value: string;
-          citation?: string;
-          license_name?: string;
-          license_url?: string;
-        };
-        common_uses?: string;
+        description?: { value: string };
         best_light_condition?: string;
         best_watering?: string;
         best_soil_type?: string;
+        toxicity?: string;
       };
     }>;
+  };
+  plantHealth?: {
+    is_healthy: {
+      probability: number;
+      binary: boolean;
+    };
+    disease?: {
+      suggestions?: Array<{
+        name: string;
+        probability: number;
+        details: {
+          description?: string;
+          treatment?: string | {
+            biological?: string[];
+            prevention?: string[];
+            chemical?: string[];
+          };
+          cause?: string;
+          url?: string;
+        };
+      }>;
+    };
   };
 }
 
 export default function PlantsScreen() {
   const [plants, setPlants] = useState<Plant[]>([]);
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const router = useRouter();
 
@@ -67,49 +73,30 @@ export default function PlantsScreen() {
   }, []);
 
   useEffect(() => {
-    if (currentUserId) {
-      loadPlants();
-    }
+    if (currentUserId) loadPlants();
   }, [currentUserId]);
 
-
-
-  // Load the current user's ID from AsyncStorage
   const loadCurrentUser = async () => {
     try {
       const userId = await AsyncStorage.getItem('userId');
-
-      if (userId) {
-        setCurrentUserId(userId);
-      } else {
-        Alert.alert('Error', 'User ID not found. Please log in.');
-      }
+      if (userId) setCurrentUserId(userId);
+      else Alert.alert('Error', 'User ID not found. Please log in.');
     } catch (error) {
       console.error('Error loading current user:', error);
     }
   };
 
-  // Fetch plants from the backend API
   const loadPlants = async () => {
     try {
-      if (!currentUserId) {
-        console.error('Error: currentUserId is missing.');
-        return;
-      }
+      if (!currentUserId) return;
 
-      // Get the authentication token
       const authToken = await AsyncStorage.getItem('accessToken');
-
-
       if (!authToken) {
-        console.error('Error: Missing authToken');
         Alert.alert('Error', 'Authentication required. Please log in again.');
         return;
       }
 
-      const url = `http://192.168.0.141:5000/plants/${currentUserId}`;
-
-      const response = await fetch(url, {
+      const response = await fetch(`http://192.168.1.10:5000/plants/${currentUserId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -117,9 +104,7 @@ export default function PlantsScreen() {
         },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch plants. Status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to fetch plants. Status: ${response.status}`);
 
       const data = await response.json();
       setPlants(data);
@@ -129,10 +114,6 @@ export default function PlantsScreen() {
     }
   };
 
-
-
-
-  // Add a new plant by sending it to the backend
   const addNewPlant = async () => {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -152,59 +133,53 @@ export default function PlantsScreen() {
 
       setIsProcessing(true);
 
-      // 1. Recognize the plant using the Create Identification Endpoint
+      // Recognize plant and assess its health
       const recognizedPlant = await recognizePlant(result.assets[0].uri);
-      console.log('🚀 Plant recognition description:', recognizedPlant.result.classification.suggestions[0].details.description);
+      const health = await assessPlantHealth(result.assets[0].uri);
+      console.log("health Data", health);
 
+      // Check if the captured image is indeed a plant and if recognition data is valid
+      if (
+        recognizedPlant.result.is_plant.binary &&
+        recognizedPlant.result.classification.suggestions.length > 0
+      ) {
+        const topSuggestion = recognizedPlant.result.classification.suggestions[0];
 
-      if (recognizedPlant.result.is_plant.binary && recognizedPlant.result.classification.suggestions.length > 0) {
-        const suggestions = recognizedPlant.result.classification.suggestions.map((suggestion) => ({
-          name: suggestion.name,
-          details: {
-            common_names: suggestion.details.common_names,
-            description: suggestion.details.description,
-            common_uses: suggestion.details.common_uses,
-            best_light_condition: suggestion.details.best_light_condition,
-            best_watering: suggestion.details.best_watering,
-            best_soil_type: suggestion.details.best_soil_type,
-          }
-        }));
-
-        const topSuggestion = suggestions[0];
-
-
-        // 3. Alert with the data
-        Alert.alert(
-          'Plant Recognized!',
-          `Top Suggestion: ${topSuggestion.name}\nDescription: ${topSuggestion.details.description?.value || 'No description available.'}\nCommon Names: ${topSuggestion.details.common_names?.join(', ') || 'No common names available.'}
-          \nBest Light Condition: ${topSuggestion.details.best_light_condition || 'No information available.'}\nBest Watering: ${topSuggestion.details.best_watering || 'No information available.'}\nBest Soil Type: ${topSuggestion.details.best_soil_type || 'No information available.'}`,
-        );
-
-        // Optionally, you can store the plant data in your state and send it to the backend
-        const newPlant: Plant = {
+        // Construct the plant object including the health data
+        const newPlant = {
           _id: '',
           name: topSuggestion.name,
           image: result.assets[0].uri,
           is_plant: recognizedPlant.result.is_plant,
           classification: recognizedPlant.result.classification,
+          plantHealth: {
+            is_healthy: health.result.is_healthy,
+            disease: health.result.disease,
+          },
         };
 
-        // Send the new plant to the backend
-        const response = await fetch('http://192.168.0.141:5000/plants', {
+        const response = await fetch('http://192.168.1.10:5000/plants', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
           },
+          // Include userId along with the newPlant payload
           body: JSON.stringify({ ...newPlant, userId: currentUserId }),
         });
 
-        if (!response.ok) {
-          throw new Error('Failed to add plant');
-        }
+        if (!response.ok) throw new Error('Failed to add plant');
 
         const createdPlant = await response.json();
+
+        // Save the newly created plant (with health data) as the current plant
+        await AsyncStorage.setItem('currentPlant', JSON.stringify(createdPlant));
+
+        // Optionally update your list
         setPlants((prevPlants) => [...prevPlants, createdPlant]);
+
+        // Navigate to Dashboard to display the plant and its health data
+        router.push('/dashboard');
       } else {
         Alert.alert('No Plant Detected', 'Please try again with a clearer image.');
       }
@@ -215,29 +190,6 @@ export default function PlantsScreen() {
       setIsProcessing(false);
     }
   };
-
-  const fetchPlants = async () => {
-    try {
-      const response = await fetch('http://192.168.0.141:5000/plants', {
-        headers: {
-          Authorization: `Bearer ${await AsyncStorage.getItem('accessToken')}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch plants');
-      }
-
-      const plants = await response.json();
-      setPlants(plants);
-    } catch (error) {
-      console.error('Error fetching plants:', error);
-    }
-  };
-
-  useEffect(() => {
-    fetchPlants();
-  }, []);
 
 
   const handlePlantPress = async (plant: Plant) => {
@@ -253,14 +205,11 @@ export default function PlantsScreen() {
     try {
       const authToken = await AsyncStorage.getItem('accessToken');
       if (!authToken) {
-        console.error('Error: Missing authToken');
         Alert.alert('Error', 'Authentication required. Please log in again.');
         return;
       }
 
-      const url = `http://192.168.0.141:5000/plants/${plantId}`;
-
-      const response = await fetch(url, {
+      const response = await fetch(`http://192.168.1.10:5000/plants/${plantId}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -268,9 +217,7 @@ export default function PlantsScreen() {
         },
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to delete plant. Status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to delete plant. Status: ${response.status}`);
 
       setPlants((prevPlants) => prevPlants.filter((plant) => plant._id !== plantId));
     } catch (error) {
@@ -323,6 +270,8 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 60,
     backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
   title: {
     fontSize: 28,
@@ -354,35 +303,23 @@ const styles = StyleSheet.create({
   plantImage: {
     width: 70,
     height: 70,
-    borderRadius: 35,
+    borderRadius: 8,
+    marginRight: 15,
   },
   plantInfo: {
-    flex: 1,
-    marginLeft: 15,
-  },
-  plantName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333333',
-  },
-  healthText: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    flex: 1,
   },
-  healthIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+  plantName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
   },
   deleteButton: {
-    backgroundColor: '#FF5252',
-    borderRadius: 50,
+    backgroundColor: '#f44336',
+    borderRadius: 8,
     padding: 8,
   },
 });
+

@@ -3,13 +3,10 @@ import axios from 'axios';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 
-const PLANT_ID_API_KEY = 'c1y6SCBSR2QwfpCDFWdFQochJctTl64VgtVg9z5hoxGvz3n882';
-const TREFLE_API_KEY = 'zbQdqwa18n_4PCYzYHYfIG4tKoAEVgvKBO_Nl4J5Mew';
-const PERENUAL_API_KEY = 'sk-oetU67e94b70ca96f9507'
+const PLANT_ID_API_KEY = 'VTSXEXvv5uzUkTJULkgDFNmzDNJ5q2rlWJVzyXbMDa2FwaT0w7';
 
 const PLANT_ID_API_URL = 'https://plant.id/api/v3/identification?details=common_names,url,description,taxonomy,rank,gbif_id,inaturalist_id,image,synonyms,edible_parts,watering,best_light_condition,best_soil_type,common_uses,cultural_significance,toxicity,best_watering&language=en';
-const PLANT_ID_API_DETAIL_URL = 'https://plant.id/api/v3/kb/plants';
-
+const PLANT_HEALTH_URL = "https://plant.id/api/v3/health_assessment?details=local_name,description,url,treatment,classification,common_names,cause"
 
 interface SimilarImage {
   id: string;
@@ -37,10 +34,11 @@ interface PlantSuggestion {
       license_name?: string;
       license_url?: string;
     };
-    best_light_condition ?: string;
-    best_soil_type ?: string,
-    best_watering ?: string;
+    best_light_condition?: string;
+    best_soil_type?: string,
+    best_watering?: string;
     watering?: string;
+    toxicity?: string
   };
 }
 
@@ -64,6 +62,28 @@ interface PlantRecognitionResult {
     };
     classification: {
       suggestions: PlantSuggestion[];
+    };
+  };
+  plantHealth?: {
+    is_healthy: {
+      probability: number;
+      binary: boolean;
+    };
+    disease?: {
+      suggestions?: Array<{
+        name: string;
+        probability: number;
+        details: {
+          description?: string;
+          treatment?: string | {
+            biological?: string[];
+            prevention?: string[];
+            chemical?: string[];
+          };
+          cause?: string;
+          url?: string;
+        };
+      }>;
     };
   };
   status: string;
@@ -110,7 +130,7 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
     });
 
     const accessToken = response.data.access_token;
-    console.log('✅ Response from Plant.id API:', accessToken);
+    console.log('✅ Response from Plant.id API:', response.data);
 
     if (!accessToken) {
       throw new Error('Access token not received.');
@@ -123,7 +143,7 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
     }
 
     const topSuggestion = suggestions[0];
-    
+
 
     // console.log('🌱 Plant Name:', topSuggestion.name);
     // console.log('🌼 Common names:', commonNames);
@@ -159,6 +179,66 @@ export const recognizePlant = async (imageUri: string): Promise<PlantRecognition
 
   } catch (error: any) {
     console.error('❌ Error recognizing plant:', error?.response?.data || error.message);
+    throw error;
+  }
+};
+
+
+export const assessPlantHealth = async (imageUri: string) => {
+  try {
+    const optimizedUri = await optimizeImage(imageUri);
+    const base64Image = await FileSystem.readAsStringAsync(optimizedUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const requestData = {
+      images: [`data:image/jpg;base64,${base64Image.trim()}`],
+      "latitude": 49.207,
+      "longitude": 16.608,
+    };
+
+    const response = await axios.post(
+      PLANT_HEALTH_URL,
+      requestData,
+      {
+        headers: {
+          'Api-Key': PLANT_ID_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        timeout: 20000,
+      }
+    );
+
+    const data = response.data
+
+    console.log('🩺 Health Assessment Result:');
+    console.log('🌿 Is Plant:', data.result.is_plant.binary, `(probability: ${data.result.is_plant.probability})`);
+    console.log('✅ Is Healthy:', data.result.is_healthy.binary, `(probability: ${data.result.is_healthy.probability})`);
+
+    const disease = data.result.disease;
+
+    if (disease?.suggestions?.length > 0) {
+      console.log(`🦠 Found ${disease.suggestions.length} disease suggestion(s):`);
+
+      disease.suggestions.forEach((suggestion: any, index: number) => {
+        console.log(`\n🔹 Suggestion #${index + 1}`);
+        console.log('Name:', suggestion.name);
+        console.log('Probability:', suggestion.probability);
+        console.log('Description:', suggestion.details?.description);
+        console.log('Treatment:', suggestion.details?.treatment);
+        console.log('Cause:', suggestion.details?.cause);
+        console.log('URL:', suggestion.details?.url);
+      });
+    } else {
+      console.log('✅ No disease detected.');
+    }
+
+    return response.data;
+  } catch (error: any) {
+    console.error(
+      '❌ Error during health assessment:',
+      error?.response?.data || error.message
+    );
     throw error;
   }
 };
